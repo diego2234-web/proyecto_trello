@@ -1,3 +1,6 @@
+import hashlib
+import hmac
+import os
 from peewee import fn, JOIN
 from REPOSITORIO.models import (
     db, Proyecto, Usuario, ProyectoUsuario, Tablero, Lista, Tarjeta,
@@ -16,7 +19,6 @@ class ServicioTrello:
             print(f"Error: {e}")
             return defecto
 
-    # ---------- General ----------
     def listar_tablas(self):
         return self._ejecutar(lambda: db.get_tables(), [])
 
@@ -103,10 +105,80 @@ class ServicioTrello:
         )
 
     # ---------- Usuarios ----------
-    def crear_usuario(self, nombre, email):
-        return self._ejecutar(
-            lambda: Usuario.create(nombre=nombre, email=email).id_usuario
+    ITERACIONES = 100_000
+
+    @staticmethod
+    def _hashear_password(password):
+        salt = os.urandom(16)
+        hash_ = hashlib.pbkdf2_hmac(
+            'sha256', password.encode(), salt, ServicioTrello.ITERACIONES
         )
+        return f"{salt.hex()}:{hash_.hex()}"
+
+    @staticmethod
+    def _verificar_password(password, almacenado):
+        try:
+            salt_hex, hash_hex = almacenado.split(':')
+            hash_ = hashlib.pbkdf2_hmac(
+                'sha256', password.encode(), bytes.fromhex(salt_hex),
+                ServicioTrello.ITERACIONES
+            )
+            return hmac.compare_digest(hash_.hex(), hash_hex)
+        except (ValueError, AttributeError):
+            return False
+
+    def crear_usuario(self, id_usuario, nombre, email, password):
+        return self._ejecutar(
+            lambda: Usuario.create(
+                id_usuario=id_usuario,
+                nombre=nombre,
+                email=email,
+                password_hash=self._hashear_password(password)
+            ).id_usuario
+        )
+
+    def iniciar_sesion(self, email, password):
+        def accion():
+            usuario = Usuario.get_or_none(Usuario.email == email)
+            if usuario is None:
+                return None, "Usuario no encontrado."
+            if not usuario.activo:
+                return None, "El usuario está deshabilitado."
+            if not self._verificar_password(password, usuario.password_hash):
+                return None, "Contraseña incorrecta."
+            return usuario, "Sesión iniciada."
+        return self._ejecutar(accion, (None, "Error de conexión."))
+
+    def actualizar_usuario(self, id_usuario, nombre=None, email=None, password=None):
+        def accion():
+            usuario = Usuario.get_or_none(Usuario.id_usuario == id_usuario)
+            if usuario is None:
+                return False, "Usuario no encontrado."
+            if email and email != usuario.email:
+                if Usuario.select().where(
+                    (Usuario.email == email) & (Usuario.id_usuario != id_usuario)
+                ).exists():
+                    return False, "El email ya está en uso."
+                usuario.email = email
+            if nombre:
+                usuario.nombre = nombre
+            if password:
+                usuario.password_hash = self._hashear_password(password)
+            usuario.save()
+            return True, "Usuario actualizado."
+        return self._ejecutar(accion, (False, "Error de conexión."))
+
+    def deshabilitar_usuario(self, id_usuario):
+        def accion():
+            usuario = Usuario.get_or_none(Usuario.id_usuario == id_usuario)
+            if usuario is None:
+                return False, "Usuario no encontrado."
+            if not usuario.activo:
+                return False, "El usuario ya está deshabilitado."
+            usuario.activo = False
+            usuario.save()
+            return True, "Usuario deshabilitado."
+        return self._ejecutar(accion, (False, "Error de conexión."))
 
     def listar_usuarios(self):
         return self._ejecutar(
