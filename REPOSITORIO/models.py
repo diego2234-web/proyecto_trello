@@ -1,17 +1,23 @@
 import datetime
 from peewee import (
-    Model, AutoField, CharField, TextField, DateField, DateTimeField,
-    IntegerField, ForeignKeyField, CompositeKey
+    Model, MySQLDatabase, AutoField, CharField, TextField, DateField,
+    DateTimeField, IntegerField, ForeignKeyField, CompositeKey, BooleanField
 )
-from REPOSITORIO.conexion import conectar
 
-db = conectar()
+from decouple import config
+
+db = MySQLDatabase(
+    config('db', default='proyecto_trello_v2'),
+    user=config('user'),
+    password=config('password', default=''),
+    host=config('host'),
+    port=int(config('port'))
+)
 
 
 class BaseModel(Model):
     class Meta:
         database = db
-
 
 class Proyecto(BaseModel):
     id_proyecto = AutoField()
@@ -24,9 +30,11 @@ class Proyecto(BaseModel):
 
 
 class Usuario(BaseModel):
+    activo = BooleanField(default=True)
     id_usuario = AutoField()
     nombre = CharField(max_length=100)
     email = CharField(max_length=150, unique=True)
+    password_hash = CharField(max_length=255, null=True)
 
     class Meta:
         table_name = 'USUARIO'
