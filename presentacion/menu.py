@@ -1,8 +1,13 @@
+import re
 from datetime import date
 from auxiliares.config import nombre_app, version_app
 from negocio.servicio_trello import ServicioTrello
+import getpass
 
 servicio = ServicioTrello()
+
+# Usuario con sesión activa
+sesion = {"usuario": None}
 
 
 # ---------- Utilidades ----------
@@ -41,6 +46,47 @@ def pedir_fecha(mensaje):
         return None
 
 
+EMAIL_REGEX = re.compile(
+    r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$"
+)
+
+
+def pedir_email(mensaje):
+    while True:
+        email = input(mensaje).strip()
+        if EMAIL_REGEX.fullmatch(email):
+            return email
+        print("Email inválido. Debe tener el formato usuario@dominio.com")
+
+
+largo = re.compile(r'.{8,}')
+digito = re.compile(r'\d+')
+letra_may = re.compile(r'[A-Z]+')
+letra_min = re.compile(r'[a-z]+')
+
+VALIDACIONES_PASSWORD = [
+    (largo, "debe tener al menos 8 caracteres"),
+    (digito, "debe tener al menos un dígito"),
+    (letra_min, "debe tener al menos una letra minúscula"),
+    (letra_may, "debe tener al menos una letra mayúscula"),
+]
+
+
+def pedir_password(mensaje, confirmar=True):
+    while True:
+        password = getpass.getpass(mensaje)
+        errores = [msg for regex, msg in VALIDACIONES_PASSWORD if not regex.search(password)]
+        if errores:
+            print("Contraseña inválida:")
+            for error in errores:
+                print(f"  - {error}")
+            continue
+        if confirmar and getpass.getpass("Repite la contraseña: ") != password:
+            print("Las contraseñas no coinciden.")
+            continue
+        return password
+
+
 def ejecutar_submenu(titulo, opciones, acciones):
     while True:
         mostrar_menu(titulo, opciones)
@@ -50,6 +96,8 @@ def ejecutar_submenu(titulo, opciones, acciones):
         accion = acciones.get(opcion)
         if accion:
             accion()
+            if sesion["usuario"] is None:
+                break
         else:
             print("Opción no válida, intenta de nuevo.")
 
@@ -111,7 +159,8 @@ def mostrar_usuarios():
     if not usuarios:
         print("  (no hay usuarios)")
     for u in usuarios:
-        print(f"  [{u.id_usuario}] {u.nombre} - {u.email}")
+        estado = "" if u.activo else " [deshabilitado]"
+        print(f"  [{u.id_usuario}] {u.nombre} - {u.email}{estado}")
     return usuarios
 
 
@@ -138,7 +187,7 @@ def crear_proyecto():
 
 def crear_tablero():
     mostrar_proyectos()
-    id_proyecto = pedir_int("Idproyecto: ")
+    id_proyecto = pedir_int("Id del proyecto: ")
     if id_proyecto is None:
         return
     titulo = pedir_texto("Título del tablero: ")
@@ -257,7 +306,7 @@ def cambiar_estado():
 
 
 def asignar_tarjeta():
-    id_tarjeta = pedir_int("Idtarjeta: ")
+    id_tarjeta = pedir_int("Id tarjeta: ")
     if id_tarjeta is None:
         return
     mostrar_usuarios()
@@ -269,13 +318,10 @@ def asignar_tarjeta():
 
 
 def comentar_tarjeta():
-    id_tarjeta = pedir_int("Idtarjeta: ")
+    id_tarjeta = pedir_int("Id tarjeta: ")
     if id_tarjeta is None:
         return
-    mostrar_usuarios()
-    id_usuario = pedir_int("Id del usuario que comenta: ")
-    if id_usuario is None:
-        return
+    id_usuario = sesion["usuario"].id_usuario
     texto = pedir_texto("Comentario: ")
     if not texto:
         return
@@ -353,15 +399,32 @@ def gestionar_tareas():
 
 # ---------- Usuarios ----------
 def crear_usuario():
+    id_usuario = pedir_int("Id usuario: ")
+    if id_usuario is None:
+        return None
     nombre = pedir_texto("Nombre: ")
     if not nombre:
-        return
-    email = pedir_texto("Email: ")
-    if not email:
-        return
-    id_nuevo = servicio.crear_usuario(nombre, email)
+        return None
+    email = pedir_email("Email: ")
+    password = pedir_password("Contraseña: ")
+    id_nuevo = servicio.crear_usuario(id_usuario, nombre, email, password)
     if id_nuevo:
         print(f"Usuario creado con id {id_nuevo}.")
+    return id_nuevo
+
+
+def iniciar_sesion():
+    print("\nInicio de sesión")
+    email = pedir_email("Email: ")
+    password = getpass.getpass("Contraseña: ")
+    usuario, msg = servicio.iniciar_sesion(email, password)
+    print(msg)
+    return usuario
+
+
+def registrar_usuario_inicial():
+    print("\nRegistro de usuario")
+    crear_usuario()
 
 
 def agregar_usuario_proyecto():
@@ -380,17 +443,54 @@ def agregar_usuario_proyecto():
         print("Usuario agregado al proyecto.")
 
 
+def actualizar_mis_datos():
+    usuario = sesion["usuario"]
+    print(f"\nActualizando datos de {usuario.nombre} (Enter para omitir cada campo)")
+    nombre = pedir_texto("Nuevo nombre: ", False)
+    email = None
+    if input("¿Cambiar email? (s/n): ").strip().lower() == "s":
+        email = pedir_email("Nuevo email: ")
+    password = None
+    if input("¿Cambiar contraseña? (s/n): ").strip().lower() == "s":
+        password = pedir_password("Nueva contraseña: ")
+    if not (nombre or email or password):
+        print("No hay cambios.")
+        return
+    ok, msg = servicio.actualizar_usuario(usuario.id_usuario, nombre, email, password)
+    print(msg)
+
+
+def eliminar_usuario():
+    mostrar_usuarios()
+    id_usuario = pedir_int("Id del usuario a eliminar: ")
+    if id_usuario is None:
+        return
+    confirmar = input("¿Seguro que desea eliminar este usuario? (s/n): ").strip().lower()
+    if confirmar != "s":
+        print("Operación cancelada.")
+        return
+    ok, msg = servicio.deshabilitar_usuario(id_usuario)
+    print(msg.replace("deshabilitado", "eliminado"))
+    if ok and id_usuario == sesion["usuario"].id_usuario:
+        print("Tu usuario fue eliminado. Cerrando sesión...")
+        sesion["usuario"] = None
+
+
 def gestionar_usuarios():
     opciones = {
         '1': 'Crear usuario',
         '2': 'Listar usuarios',
         '3': 'Agregar usuario a un proyecto',
+        '4': 'Actualizar mis datos',
+        '5': 'Eliminar usuario',
         '0': 'Volver'
     }
     acciones = {
         '1': crear_usuario,
         '2': mostrar_usuarios,
-        '3': agregar_usuario_proyecto
+        '3': agregar_usuario_proyecto,
+        '4': actualizar_mis_datos,
+        '5': eliminar_usuario
     }
     ejecutar_submenu("Gestión de Usuarios", opciones, acciones)
 
@@ -405,6 +505,7 @@ def reporte_avance():
     print("\nAvance del proyecto (tarjetas por estado):")
     if not datos:
         print("  (el proyecto no tiene tarjetas)")
+        return
     total = sum(cantidad for _, cantidad in datos)
     for estado, cantidad in datos:
         porcentaje = cantidad * 100 / total
@@ -433,15 +534,45 @@ def gestionar_reportes():
     ejecutar_submenu("Reportes", opciones, acciones)
 
 
-# ---------- Menú principal ----------
+# ---------- Acceso + menú principal ----------
+def menu_acceso():
+    opciones = {
+        '1': 'Iniciar sesión',
+        '2': 'Registrarse',
+        '0': 'Salir'
+    }
+    intentos = 0
+    while True:
+        mostrar_menu(f"{nombre_app} - v{version_app}", opciones)
+        opcion = input("Selecciona una opción: ").strip()
+        if opcion == '0':
+            return None
+        if opcion == '1':
+            usuario = iniciar_sesion()
+            if usuario:
+                return usuario
+            intentos += 1
+            if intentos >= 3:
+                print("Demasiados intentos fallidos.")
+                return None
+        elif opcion == '2':
+            registrar_usuario_inicial()
+        else:
+            print("Opción no válida, intenta de nuevo.")
+
+
 def cargar_menu():
+    sesion["usuario"] = menu_acceso()
+    if not sesion["usuario"]:
+        print("Saliendo...")
+        return
     opciones = {
         '1': 'Gestión de Proyectos',
         '2': 'Gestión de Tareas',
         '3': 'Gestión de Usuarios',
         '4': 'Reportes',
         '5': 'Ver tablas de la base de datos',
-        '6': 'Salir'
+        '6': 'Cerrar sesión'
     }
     acciones = {
         '1': gestionar_proyectos,
@@ -450,11 +581,12 @@ def cargar_menu():
         '4': gestionar_reportes,
         '5': mostrar_tablas
     }
-    while True:
-        mostrar_menu(f"{nombre_app} - v{version_app}", opciones)
+    while sesion["usuario"] is not None:
+        mostrar_menu(f"{nombre_app} - v{version_app} | {sesion['usuario'].nombre}", opciones)
         opcion = input("Selecciona una opción: ").strip()
         if opcion == '6':
-            print("Saliendo...")
+            sesion["usuario"] = None
+            print("Sesión cerrada.")
             break
         accion = acciones.get(opcion)
         if accion:
