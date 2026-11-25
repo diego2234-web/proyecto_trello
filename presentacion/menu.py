@@ -413,6 +413,15 @@ def crear_usuario():
     return id_nuevo
 
 
+def buscar_usuario_por_email(servicio):
+    email = input("Correo a buscar: ").strip().lower()
+    usuario = servicio.buscar_usuario_por_email(email)
+    if usuario:
+        print(f"ID: {usuario.id_usuario} | Nombre: {usuario.nombre} | Email: {usuario.email}")
+    else:
+        print("No se encontró un usuario con ese correo.")
+
+
 def iniciar_sesion():
     print("\nInicio de sesión")
     email = pedir_email("Email: ")
@@ -476,6 +485,16 @@ def eliminar_usuario():
         sesion["usuario"] = None
 
 
+def buscar_usuario_por_email():
+    email = pedir_email("Correo a buscar: ").lower()
+    usuario = servicio.buscar_usuario_por_email(email)
+    if usuario:
+        estado = "" if usuario.activo else " [deshabilitado]"
+        print(f"ID: {usuario.id_usuario} | Nombre: {usuario.nombre} | Email: {usuario.email}{estado}")
+    else:
+        print("No se encontró un usuario con ese correo.")
+
+
 def gestionar_usuarios():
     opciones = {
         '1': 'Crear usuario',
@@ -483,6 +502,7 @@ def gestionar_usuarios():
         '3': 'Agregar usuario a un proyecto',
         '4': 'Actualizar mis datos',
         '5': 'Eliminar usuario',
+        '6': 'Buscar usuario por correo',
         '0': 'Volver'
     }
     acciones = {
@@ -490,10 +510,10 @@ def gestionar_usuarios():
         '2': mostrar_usuarios,
         '3': agregar_usuario_proyecto,
         '4': actualizar_mis_datos,
-        '5': eliminar_usuario
+        '5': eliminar_usuario,
+        '6': buscar_usuario_por_email
     }
     ejecutar_submenu("Gestión de Usuarios", opciones, acciones)
-
 
 # ---------- Reportes ----------
 def reporte_avance():
