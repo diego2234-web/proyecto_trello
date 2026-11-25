@@ -1,5 +1,3 @@
-# datos/negocio/servicio_usuario.py
-
 from prettytable import PrettyTable
 from REPOSITORIO.repositorio_usario import (
     listado_usuarios_habilitados,
