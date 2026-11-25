@@ -9,7 +9,8 @@ from REPOSITORIO.models import (
 
 
 class ServicioTrello:
-
+    # negocio/servicio_trello.py (dentro de ServicioTrello)
+   
     def _ejecutar(self, accion, defecto=None):
         """Abre y cierra la conexión, y aísla los errores."""
         try:
@@ -19,6 +20,10 @@ class ServicioTrello:
             print(f"Error: {e}")
             return defecto
 
+   
+    def buscar_usuario_por_email(self, email):
+      return Usuario.get_or_none(Usuario.email == email.strip().lower())
+      
     def listar_tablas(self):
         return self._ejecutar(lambda: db.get_tables(), [])
 
